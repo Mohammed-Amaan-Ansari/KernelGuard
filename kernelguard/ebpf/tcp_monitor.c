@@ -1,5 +1,4 @@
 #include <uapi/linux/ptrace.h>
-#include <net/sock.h>
 
 struct tcp_event_t {
     u32 pid;
@@ -11,9 +10,24 @@ struct tcp_event_t {
 
 BPF_PERF_OUTPUT(tcp_events);
 
-int trace_tcp_v4_connect(struct pt_regs *ctx, struct sock *sk)
+/*
+ * tcp_v4_connect(struct sock *sk, ...)
+ *
+ * We intentionally do not include <net/sock.h>.
+ * The WSL kernel headers used by BCC have an
+ * incomplete struct bpf_task_work definition.
+ *
+ * BCC's bpf_probe_read_kernel() is used to safely
+ * read the required fields from the socket structure.
+ */
+
+int trace_tcp_v4_connect(struct pt_regs *ctx)
 {
     struct tcp_event_t event = {};
+
+    void *sk;
+    u32 daddr;
+    u16 dport;
 
     event.pid = bpf_get_current_pid_tgid() >> 32;
     event.uid = bpf_get_current_uid_gid() & 0xFFFFFFFF;
@@ -23,15 +37,40 @@ int trace_tcp_v4_connect(struct pt_regs *ctx, struct sock *sk)
         sizeof(event.comm)
     );
 
+    sk = (void *)PT_REGS_PARM1(ctx);
+
     if (sk == NULL) {
         return 0;
     }
 
-    event.daddr = sk->__sk_common.skc_daddr;
-    event.dport = sk->__sk_common.skc_dport;
+    /*
+     * On Linux, skc_daddr and skc_dport are located
+     * inside struct sock_common.
+     *
+     * These offsets are kernel-version dependent.
+     *
+     * We will validate the result against the WSL
+     * kernel before relying on it.
+     */
 
-    event.dport = event.dport >> 8 |
-                  event.dport << 8;
+    bpf_probe_read_kernel(
+        &daddr,
+        sizeof(daddr),
+        sk + 24
+    );
+
+    bpf_probe_read_kernel(
+        &dport,
+        sizeof(dport),
+        sk + 28
+    );
+
+    event.daddr = daddr;
+
+    /*
+     * Network ports are stored in network byte order.
+     */
+    event.dport = (dport >> 8) | (dport << 8);
 
     tcp_events.perf_submit(
         ctx,
