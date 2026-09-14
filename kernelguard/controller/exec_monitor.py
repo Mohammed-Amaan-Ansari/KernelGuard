@@ -1,4 +1,5 @@
 from pathlib import Path
+from ctypes import c_uint
 
 from bcc import BPF
 
@@ -18,11 +19,23 @@ def main():
 
     bpf = BPF(text=bpf_program)
 
+    # --------------------------------------------------
+    # PID FILTER
+    # --------------------------------------------------
+
+    # 0 = monitor all processes
     target_pid_value = 0
 
     target_pid = bpf["target_pid"]
 
-    target_pid[0] = target_pid_value
+    key = c_uint(0)
+    value = c_uint(target_pid_value)
+
+    target_pid[key] = value
+
+    # --------------------------------------------------
+    # EVENT HANDLER
+    # --------------------------------------------------
 
     def handle_event(cpu, data, size):
         event = bpf["exec_events"].event(data)
@@ -48,6 +61,10 @@ def main():
     bpf["exec_events"].open_perf_buffer(
         handle_event
     )
+
+    # --------------------------------------------------
+    # START MONITOR
+    # --------------------------------------------------
 
     print("=" * 70)
     print("KernelGuard - eBPF Exec Monitor")
