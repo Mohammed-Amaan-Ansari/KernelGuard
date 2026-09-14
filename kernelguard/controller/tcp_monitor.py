@@ -26,6 +26,11 @@ def main():
 
     bpf = BPF(text=bpf_program)
 
+    bpf.attach_kprobe(
+        event="tcp_v4_connect",
+        fn_name="trace_tcp_v4_connect"
+    )
+
     def handle_event(cpu, data, size):
         event = bpf["tcp_events"].event(data)
 
@@ -52,7 +57,8 @@ def main():
     print("=" * 70)
     print("KernelGuard - eBPF TCP Monitor")
     print("=" * 70)
-    print("Monitoring TCP connection attempts...")
+    print("Hook       : tcp_v4_connect")
+    print("Monitoring : IPv4 TCP connection attempts")
     print("Press Ctrl+C to stop.")
     print()
 
