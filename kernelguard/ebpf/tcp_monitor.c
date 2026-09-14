@@ -1,6 +1,5 @@
 #include <uapi/linux/ptrace.h>
 #include <net/sock.h>
-#include <bcc/proto.h>
 
 struct tcp_event_t {
     u32 pid;
@@ -12,7 +11,7 @@ struct tcp_event_t {
 
 BPF_PERF_OUTPUT(tcp_events);
 
-TRACEPOINT_PROBE(tcp, tcp_connect)
+int trace_tcp_v4_connect(struct pt_regs *ctx, struct sock *sk)
 {
     struct tcp_event_t event = {};
 
@@ -24,11 +23,18 @@ TRACEPOINT_PROBE(tcp, tcp_connect)
         sizeof(event.comm)
     );
 
-    event.daddr = args->daddr;
-    event.dport = args->dport;
+    if (sk == NULL) {
+        return 0;
+    }
+
+    event.daddr = sk->__sk_common.skc_daddr;
+    event.dport = sk->__sk_common.skc_dport;
+
+    event.dport = event.dport >> 8 |
+                  event.dport << 8;
 
     tcp_events.perf_submit(
-        args,
+        ctx,
         &event,
         sizeof(event)
     );
