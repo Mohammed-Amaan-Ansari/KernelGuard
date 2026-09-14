@@ -3,26 +3,31 @@
 struct exec_event_t {
     u32 pid;
     u32 ppid;
-
     char comm[16];
     char filename[256];
 };
 
 BPF_PERF_OUTPUT(exec_events);
 
+BPF_ARRAY(target_pid, u32, 1);
+
 TRACEPOINT_PROBE(syscalls, sys_enter_execve)
 {
     struct exec_event_t event = {};
 
+    u32 key = 0;
+    u32 *pid_filter;
+
     event.pid = bpf_get_current_pid_tgid() >> 32;
 
-    /*
-     * PPID will be implemented using a
-     * kernel-compatible approach in a later stage.
-     *
-     * Keeping it at 0 allows the first version
-     * to remain compatible with WSL/BCC.
-     */
+    pid_filter = target_pid.lookup(&key);
+
+    if (pid_filter != NULL && *pid_filter != 0) {
+        if (event.pid != *pid_filter) {
+            return 0;
+        }
+    }
+
     event.ppid = 0;
 
     bpf_get_current_comm(
