@@ -18,6 +18,12 @@ def main():
 
     bpf = BPF(text=bpf_program)
 
+    target_pid_value = 0
+
+    target_pid = bpf["target_pid"]
+
+    target_pid[0] = target_pid_value
+
     def handle_event(cpu, data, size):
         event = bpf["exec_events"].event(data)
 
@@ -46,7 +52,14 @@ def main():
     print("=" * 70)
     print("KernelGuard - eBPF Exec Monitor")
     print("=" * 70)
-    print("Monitoring process execution...")
+
+    if target_pid_value == 0:
+        print("PID Filter : DISABLED")
+        print("Monitoring all process executions.")
+    else:
+        print(f"PID Filter : {target_pid_value}")
+        print(f"Monitoring PID {target_pid_value} only.")
+
     print("Press Ctrl+C to stop.")
     print()
 
