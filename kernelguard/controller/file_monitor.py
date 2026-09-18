@@ -1,9 +1,26 @@
+import argparse
+from ctypes import c_uint
 from pathlib import Path
 
 from bcc import BPF
 
 
 def main():
+    parser = argparse.ArgumentParser(
+        description="KernelGuard eBPF write syscall monitor"
+    )
+
+    parser.add_argument(
+        "pid",
+        type=int,
+        help="PID of the process to monitor"
+    )
+
+    args = parser.parse_args()
+
+    if args.pid <= 0:
+        raise ValueError("PID must be greater than 0")
+
     project_root = Path(__file__).resolve().parents[2]
 
     ebpf_file = (
@@ -23,6 +40,14 @@ def main():
         fn_name="trace_sys_write"
     )
 
+    # Configure target PID
+    target_pid = bpf["target_pid"]
+
+    key = c_uint(0)
+    value = c_uint(args.pid)
+
+    target_pid[key] = value
+
     def handle_event(cpu, data, size):
         event = bpf["file_events"].event(data)
 
@@ -35,27 +60,33 @@ def main():
             f"[FILE_WRITE] "
             f"PID={event.pid} "
             f"UID={event.uid} "
-            f"COMM={comm}"
+            f"COMM={comm}",
+            flush=True
         )
 
-    bpf["file_events"].open_perf_buffer(
-        handle_event
-    )
+    bpf["file_events"].open_perf_buffer(handle_event)
 
     print("=" * 70)
     print("KernelGuard - eBPF File Write Monitor")
     print("=" * 70)
+    print(f"Target PID : {args.pid}")
     print("Hook       : __x64_sys_write")
-    print("Monitoring : File write syscall events")
+    print("Monitoring : Write syscalls from target PID only")
     print("Press Ctrl+C to stop.")
     print()
 
     try:
         while True:
-            bpf.perf_buffer_poll()
+            bpf.perf_buffer_poll(timeout=100)
 
     except KeyboardInterrupt:
         print("\nKernelGuard file monitor stopped.")
+
+    finally:
+        try:
+            bpf.cleanup()
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":
