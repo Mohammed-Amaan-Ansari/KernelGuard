@@ -8,11 +8,34 @@ struct file_event_t {
 
 BPF_PERF_OUTPUT(file_events);
 
+/*
+ * target_pid[0] = PID to monitor.
+ * 0 means monitoring is disabled until a PID is provided.
+ */
+BPF_ARRAY(target_pid, u32, 1);
+
 int trace_sys_write(struct pt_regs *ctx)
 {
     struct file_event_t event = {};
 
+    u32 key = 0;
+    u32 *pid_filter;
+
     event.pid = bpf_get_current_pid_tgid() >> 32;
+
+    pid_filter = target_pid.lookup(&key);
+
+    /*
+     * Only monitor the selected PID.
+     */
+    if (pid_filter == NULL || *pid_filter == 0) {
+        return 0;
+    }
+
+    if (event.pid != *pid_filter) {
+        return 0;
+    }
+
     event.uid = bpf_get_current_uid_gid() & 0xFFFFFFFF;
 
     bpf_get_current_comm(
