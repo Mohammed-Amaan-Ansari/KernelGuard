@@ -1,5 +1,11 @@
 #include <uapi/linux/ptrace.h>
 
+struct sockaddr_in_t {
+    u16 sin_family;
+    u16 sin_port;
+    u32 sin_addr;
+};
+
 struct tcp_event_t {
     u32 pid;
     u32 uid;
@@ -10,24 +16,10 @@ struct tcp_event_t {
 
 BPF_PERF_OUTPUT(tcp_events);
 
-/*
- * tcp_v4_connect(struct sock *sk, ...)
- *
- * We intentionally do not include <net/sock.h>.
- * The WSL kernel headers used by BCC have an
- * incomplete struct bpf_task_work definition.
- *
- * BCC's bpf_probe_read_kernel() is used to safely
- * read the required fields from the socket structure.
- */
-
-int trace_tcp_v4_connect(struct pt_regs *ctx)
+TRACEPOINT_PROBE(syscalls, sys_enter_connect)
 {
     struct tcp_event_t event = {};
-
-    void *sk;
-    u32 daddr;
-    u16 dport;
+    struct sockaddr_in_t addr = {};
 
     event.pid = bpf_get_current_pid_tgid() >> 32;
     event.uid = bpf_get_current_uid_gid() & 0xFFFFFFFF;
@@ -37,43 +29,29 @@ int trace_tcp_v4_connect(struct pt_regs *ctx)
         sizeof(event.comm)
     );
 
-    sk = (void *)PT_REGS_PARM1(ctx);
-
-    if (sk == NULL) {
+    if (args->addrlen < sizeof(addr)) {
         return 0;
     }
 
-    /*
-     * On Linux, skc_daddr and skc_dport are located
-     * inside struct sock_common.
-     *
-     * These offsets are kernel-version dependent.
-     *
-     * We will validate the result against the WSL
-     * kernel before relying on it.
-     */
+    if (args->uservaddr == NULL) {
+        return 0;
+    }
 
-    bpf_probe_read_kernel(
-        &daddr,
-        sizeof(daddr),
-        sk + 24
+    bpf_probe_read_user(
+        &addr,
+        sizeof(addr),
+        args->uservaddr
     );
 
-    bpf_probe_read_kernel(
-        &dport,
-        sizeof(dport),
-        sk + 28
-    );
+    if (addr.sin_family != 2) {
+        return 0;
+    }
 
-    event.daddr = daddr;
-
-    /*
-     * Network ports are stored in network byte order.
-     */
-    event.dport = (dport >> 8) | (dport << 8);
+    event.daddr = addr.sin_addr;
+    event.dport = addr.sin_port;
 
     tcp_events.perf_submit(
-        ctx,
+        args,
         &event,
         sizeof(event)
     );
