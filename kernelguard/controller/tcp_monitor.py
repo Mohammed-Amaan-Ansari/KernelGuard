@@ -26,11 +26,6 @@ def main():
 
     bpf = BPF(text=bpf_program)
 
-    bpf.attach_kprobe(
-        event="tcp_v4_connect",
-        fn_name="trace_tcp_v4_connect"
-    )
-
     def handle_event(cpu, data, size):
         event = bpf["tcp_events"].event(data)
 
@@ -41,13 +36,16 @@ def main():
 
         destination = ipv4_to_string(event.daddr)
 
+        port = socket.ntohs(event.dport)
+
         print(
             f"[TCP] "
             f"PID={event.pid} "
             f"UID={event.uid} "
             f"COMM={comm} "
             f"DST={destination} "
-            f"PORT={event.dport}"
+            f"PORT={port}",
+            flush=True
         )
 
     bpf["tcp_events"].open_perf_buffer(
@@ -57,17 +55,23 @@ def main():
     print("=" * 70)
     print("KernelGuard - eBPF TCP Monitor")
     print("=" * 70)
-    print("Hook       : tcp_v4_connect")
+    print("Hook       : sys_enter_connect")
     print("Monitoring : IPv4 TCP connection attempts")
     print("Press Ctrl+C to stop.")
     print()
 
     try:
         while True:
-            bpf.perf_buffer_poll()
+            bpf.perf_buffer_poll(timeout=100)
 
     except KeyboardInterrupt:
         print("\nKernelGuard TCP monitor stopped.")
+
+    finally:
+        try:
+            bpf.cleanup()
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":
