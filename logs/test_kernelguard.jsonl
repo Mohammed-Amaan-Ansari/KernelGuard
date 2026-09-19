@@ -1,0 +1,1 @@
+{"timestamp": "2026-09-19T05:01:11.121426+00:00", "event_type": "EXEC", "pid": 1234, "uid": 1000, "comm": "bash", "data": {"filename": "/usr/bin/ls"}}
