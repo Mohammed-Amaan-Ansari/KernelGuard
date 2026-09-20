@@ -35,3 +35,9 @@ dist/
 # Temporary files
 *.tmp
 *.swp
+
+# KernelGuard runtime logs
+logs/
+
+# KernelGuard runtime logs
+logs/
