@@ -1,7 +1,10 @@
-from pathlib import Path
 from ctypes import c_uint
+from pathlib import Path
 
 from bcc import BPF
+
+from kernelguard.events.logger import EventLogger
+from kernelguard.events.model import SecurityEvent
 
 
 def main():
@@ -19,11 +22,7 @@ def main():
 
     bpf = BPF(text=bpf_program)
 
-    # --------------------------------------------------
-    # PID FILTER
-    # --------------------------------------------------
-
-    # 0 = monitor all processes
+    # PID filtering
     target_pid_value = 0
 
     target_pid = bpf["target_pid"]
@@ -33,9 +32,10 @@ def main():
 
     target_pid[key] = value
 
-    # --------------------------------------------------
-    # EVENT HANDLER
-    # --------------------------------------------------
+    # Central event logger
+    logger = EventLogger(
+        project_root / "logs" / "kernelguard.jsonl"
+    )
 
     def handle_event(cpu, data, size):
         event = bpf["exec_events"].event(data)
@@ -50,21 +50,22 @@ def main():
             "replace"
         ).rstrip("\x00")
 
-        print(
-            f"[EXEC] "
-            f"PID={event.pid} "
-            f"PPID={event.ppid} "
-            f"COMM={comm} "
-            f"FILE={filename}"
+        security_event = SecurityEvent(
+            event_type="EXEC",
+            pid=event.pid,
+            uid=0,
+            comm=comm,
+            data={
+                "filename": filename
+            }
         )
+
+        logger.log(security_event)
+        logger.print_event(security_event)
 
     bpf["exec_events"].open_perf_buffer(
         handle_event
     )
-
-    # --------------------------------------------------
-    # START MONITOR
-    # --------------------------------------------------
 
     print("=" * 70)
     print("KernelGuard - eBPF Exec Monitor")
@@ -77,15 +78,23 @@ def main():
         print(f"PID Filter : {target_pid_value}")
         print(f"Monitoring PID {target_pid_value} only.")
 
+    print("Event Pipeline : ENABLED")
+    print("Log File       : logs/kernelguard.jsonl")
     print("Press Ctrl+C to stop.")
     print()
 
     try:
         while True:
-            bpf.perf_buffer_poll()
+            bpf.perf_buffer_poll(timeout=100)
 
     except KeyboardInterrupt:
-        print("\nKernelGuard monitor stopped.")
+        print("\nKernelGuard exec monitor stopped.")
+
+    finally:
+        try:
+            bpf.cleanup()
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":
