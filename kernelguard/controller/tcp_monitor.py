@@ -4,6 +4,9 @@ from pathlib import Path
 
 from bcc import BPF
 
+from kernelguard.events.logger import EventLogger
+from kernelguard.events.model import SecurityEvent
+
 
 def ipv4_to_string(address):
     return socket.inet_ntoa(
@@ -26,6 +29,10 @@ def main():
 
     bpf = BPF(text=bpf_program)
 
+    logger = EventLogger(
+        project_root / "logs" / "kernelguard.jsonl"
+    )
+
     def handle_event(cpu, data, size):
         event = bpf["tcp_events"].event(data)
 
@@ -35,17 +42,24 @@ def main():
         ).rstrip("\x00")
 
         destination = ipv4_to_string(event.daddr)
-
         port = socket.ntohs(event.dport)
 
+        security_event = SecurityEvent(
+            event_type="TCP_CONNECT",
+            pid=event.pid,
+            uid=event.uid,
+            comm=comm,
+            data={
+                "destination": destination,
+                "port": port
+            }
+        )
+
+        logger.log(security_event)
+        logger.print_event(security_event)
+
         print(
-            f"[TCP] "
-            f"PID={event.pid} "
-            f"UID={event.uid} "
-            f"COMM={comm} "
-            f"DST={destination} "
-            f"PORT={port}",
-            flush=True
+            f"    -> {destination}:{port}"
         )
 
     bpf["tcp_events"].open_perf_buffer(
@@ -55,8 +69,10 @@ def main():
     print("=" * 70)
     print("KernelGuard - eBPF TCP Monitor")
     print("=" * 70)
-    print("Hook       : sys_enter_connect")
-    print("Monitoring : IPv4 TCP connection attempts")
+    print("Hook           : sys_enter_connect")
+    print("Monitoring     : IPv4 TCP connection attempts")
+    print("Event Pipeline : ENABLED")
+    print("Log File       : logs/kernelguard.jsonl")
     print("Press Ctrl+C to stop.")
     print()
 
