@@ -4,6 +4,9 @@ from pathlib import Path
 
 from bcc import BPF
 
+from kernelguard.events.logger import EventLogger
+from kernelguard.events.model import SecurityEvent
+
 
 def main():
     parser = argparse.ArgumentParser(
@@ -48,6 +51,11 @@ def main():
 
     target_pid[key] = value
 
+    # Central event logger
+    logger = EventLogger(
+        project_root / "logs" / "kernelguard.jsonl"
+    )
+
     def handle_event(cpu, data, size):
         event = bpf["file_events"].event(data)
 
@@ -56,22 +64,31 @@ def main():
             "replace"
         ).rstrip("\x00")
 
-        print(
-            f"[FILE_WRITE] "
-            f"PID={event.pid} "
-            f"UID={event.uid} "
-            f"COMM={comm}",
-            flush=True
+        security_event = SecurityEvent(
+            event_type="FILE_WRITE",
+            pid=event.pid,
+            uid=event.uid,
+            comm=comm,
+            data={
+                "syscall": "write"
+            }
         )
 
-    bpf["file_events"].open_perf_buffer(handle_event)
+        logger.log(security_event)
+        logger.print_event(security_event)
+
+    bpf["file_events"].open_perf_buffer(
+        handle_event
+    )
 
     print("=" * 70)
     print("KernelGuard - eBPF File Write Monitor")
     print("=" * 70)
-    print(f"Target PID : {args.pid}")
-    print("Hook       : __x64_sys_write")
-    print("Monitoring : Write syscalls from target PID only")
+    print(f"Target PID     : {args.pid}")
+    print("Hook           : __x64_sys_write")
+    print("Monitoring     : Write syscalls from target PID only")
+    print("Event Pipeline : ENABLED")
+    print("Log File       : logs/kernelguard.jsonl")
     print("Press Ctrl+C to stop.")
     print()
 
